@@ -54,11 +54,29 @@
     color: #f3f4f6;
   }
   .error { color: #f87171; margin-top: 12px; min-height: 1em; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .topbar a { color: #a3e635; font-size: 14px; }
+  .route { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9ca3af; margin: 0 0 16px; }
+  .route code { color: #d1d5db; }
+  .route button { padding: 4px 10px; font-size: 13px; margin: 0; }
+  .banner { display: none; background: #7f1d1d; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+  .banner.visible { display: block; }
 </style>
 </head>
 <body>
-<h1>Placar ao vivo</h1>
+<div class="topbar">
+  <a href="/">← Partidas</a>
+  <button class="danger" id="finish-button" onclick="finishMatch()">Finalizar partida</button>
+</div>
+<h1 id="title">Placar ao vivo</h1>
+<div class="route">
+  Overlay: <code id="overlay-url"></code>
+  <button onclick="copy('overlay-url', this)">Copiar</button>
+</div>
+<div class="banner" id="finished-banner">Partida finalizada. O placar não pode mais ser alterado.</div>
 
+<div id="panel">
 <div class="teams">
   <div class="team">
     <div class="summary" id="summary-0"></div>
@@ -66,10 +84,10 @@
     <button class="primary" onclick="point(0)">+ Ponto</button>
     <button onclick="switchServe()">Trocar saque</button>
     <div class="adjust">
-      <button onclick="teamAction('/api/games/add', 0)">+ Game</button>
-      <button onclick="teamAction('/api/games/remove', 0)">− Game</button>
-      <button onclick="teamAction('/api/sets/add', 0)">+ Set</button>
-      <button onclick="teamAction('/api/sets/remove', 0)">− Set</button>
+      <button onclick="teamAction(base + '/games/add', 0)">+ Game</button>
+      <button onclick="teamAction(base + '/games/remove', 0)">− Game</button>
+      <button onclick="teamAction(base + '/sets/add', 0)">+ Set</button>
+      <button onclick="teamAction(base + '/sets/remove', 0)">− Set</button>
     </div>
   </div>
   <div class="team">
@@ -78,10 +96,10 @@
     <button class="primary" onclick="point(1)">+ Ponto</button>
     <button onclick="switchServe()">Trocar saque</button>
     <div class="adjust">
-      <button onclick="teamAction('/api/games/add', 1)">+ Game</button>
-      <button onclick="teamAction('/api/games/remove', 1)">− Game</button>
-      <button onclick="teamAction('/api/sets/add', 1)">+ Set</button>
-      <button onclick="teamAction('/api/sets/remove', 1)">− Set</button>
+      <button onclick="teamAction(base + '/games/add', 1)">+ Game</button>
+      <button onclick="teamAction(base + '/games/remove', 1)">− Game</button>
+      <button onclick="teamAction(base + '/sets/add', 1)">+ Set</button>
+      <button onclick="teamAction(base + '/sets/remove', 1)">− Set</button>
     </div>
   </div>
 </div>
@@ -99,11 +117,54 @@
   <input id="team-input-1" placeholder="Pedro, Lucas">
   <button onclick="saveTeams()" style="margin-top:12px">Salvar nomes</button>
 </div>
+</div>
 
 <div class="error" id="error"></div>
 
 <script>
+  // The game id is the second segment of the path: /scoreboard/<id>/control
+  var gameId = location.pathname.split("/")[2];
+  var base = "/api/scoreboard/" + gameId;
   var bestOf = 3;
+
+  function loadGame() {
+    fetch("/api/games/" + gameId).then(function (r) {
+      if (!r.ok) throw new Error("Partida não encontrada");
+      return r.json();
+    }).then(function (game) {
+      document.getElementById("title").textContent = game.name;
+      document.title = game.name + " - Painel de controle";
+      document.getElementById("overlay-url").textContent =
+        location.origin + "/scoreboard/" + gameId + "/overlay";
+      lockPanel(game.finishedAt !== null);
+    }).catch(function (e) {
+      document.getElementById("error").textContent = e.message;
+    });
+  }
+
+  // Finished matches keep showing the overlay, but no change is allowed.
+  function lockPanel(finished) {
+    document.querySelectorAll("#panel button").forEach(function (b) { b.disabled = finished; });
+    document.getElementById("finish-button").disabled = finished;
+    document.getElementById("finished-banner").classList.toggle("visible", finished);
+  }
+
+  function finishMatch() {
+    if (!confirm("Finalizar esta partida? O placar não poderá mais ser alterado.")) return;
+    fetch("/api/games/" + gameId + "/finish", { method: "POST" }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t.trim()); });
+      lockPanel(true);
+    }).catch(function (e) {
+      document.getElementById("error").textContent = e.message;
+    });
+  }
+
+  function copy(id, button) {
+    navigator.clipboard.writeText(document.getElementById(id).textContent).then(function () {
+      button.textContent = "Copiado";
+      setTimeout(function () { button.textContent = "Copiar"; }, 1500);
+    });
+  }
 
   function send(path, body) {
     return fetch(path, {
@@ -121,13 +182,13 @@
     });
   }
 
-  function point(team) { send("/api/point", { team: team }); }
+  function point(team) { send(base + "/point", { team: team }); }
   function teamAction(path, team) { send(path, { team: team }); }
-  function switchServe() { send("/api/serve", {}); }
-  function undo() { send("/api/undo", {}); }
+  function switchServe() { send(base + "/serve", {}); }
+  function undo() { send(base + "/undo", {}); }
   function reset() {
     if (confirm("Zerar o placar atual? Os nomes serão mantidos.")) {
-      send("/api/reset", { bestOf: bestOf });
+      send(base + "/reset", { bestOf: bestOf });
     }
   }
 
@@ -137,7 +198,7 @@
       var players = text.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
       return { players: players };
     });
-    send("/api/teams", { teams: teams });
+    send(base + "/teams", { teams: teams });
   }
 
   function render(view) {
@@ -163,8 +224,10 @@
   }
 
   // Syncs with the server and updates when another panel changes the score.
-  var events = new EventSource("/events");
+  var events = new EventSource(base + "/events");
   events.onmessage = function (e) { render(JSON.parse(e.data)); };
+
+  loadGame();
 </script>
 </body>
 </html>

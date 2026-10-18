@@ -1,39 +1,51 @@
-// Command broadcast starts the scoreboard server to use with OBS.
+// Command broadcast starts the scoreboard server. It needs a running Postgres
+// (see docker-compose.yml) and the settings in application-<ENVIRONMENT>.properties
+// or in environment variables (see internal/config).
 //
 // Usage:
 //
-//	go run ./cmd/broadcast -addr :8080 -best-of 3
+//	ENVIRONMENT=local go run ./cmd/broadcast
 //
-// In OBS, add a "Browser" source with the URL http://localhost:8080/scoreboard/overlay.
-// To operate the scoreboard, open http://localhost:8080/control in another tab or device.
+// Open http://localhost:8080/ to create matches. In OBS, add a "Browser" source
+// with http://localhost:8080/scoreboard/<game id>/overlay.
 package main
 
 import (
-	"flag"
+	"context"
 	"log"
 	"net/http"
 
-	"broadcast/internal/scoreboard"
-	"broadcast/internal/server"
+	"broadcast/internal/config"
+	"broadcast/internal/handler"
+	"broadcast/internal/infra/database"
+	"broadcast/internal/repository"
+	"broadcast/internal/service"
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP address of the server")
-	bestOf := flag.Int("best-of", 3, "number of sets in the match (1, 3 or 5)")
-	flag.Parse()
-
-	teams := [2]scoreboard.Team{
-		{Players: []string{"Team A"}},
-		{Players: []string{"Team B"}},
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
 	}
-	match, err := scoreboard.NewMatch(teams, *bestOf)
+
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL())
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer pool.Close()
 
-	srv := server.New(scoreboard.NewScoreboard(match))
+	if err := database.Migrate(ctx, pool); err != nil {
+		log.Fatal(err)
+	}
 
-	log.Printf("overlay: http://localhost%s/scoreboard/overlay", *addr)
-	log.Printf("control: http://localhost%s/control", *addr)
-	log.Fatal(http.ListenAndServe(*addr, srv.Handler()))
+	games := repository.NewGames(pool)
+	boards := repository.NewScoreboards(pool)
+	h := handler.New(
+		service.NewGameService(games),
+		service.NewScoreboardService(games, boards),
+	)
+
+	log.Printf("environment: %q, listening on %s", cfg.Environment, cfg.ServerAddr)
+	log.Fatal(http.ListenAndServe(cfg.ServerAddr, h.Routes()))
 }

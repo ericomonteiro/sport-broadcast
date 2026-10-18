@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Placar - Partidas</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #111827;
+    color: #f3f4f6;
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #1f2937;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 20px;
+    padding: 20px 24px;
+    max-width: 1280px;
+  }
+  section {
+    background: #1f2937;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: #9ca3af; margin: 10px 0 4px; }
+  input, select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #374151;
+    background: #111827;
+    color: #f3f4f6;
+    font: inherit;
+  }
+  button {
+    font: inherit;
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    background: #374151;
+    color: #f3f4f6;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #4b5563; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary { background: #65a30d; color: #fff; width: 100%; margin-top: 14px; }
+  button.danger { background: #7f1d1d; }
+  button.small { padding: 6px 10px; font-size: 13px; }
+  .open-list { list-style: none; margin: 0; padding: 0; }
+  .open-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #111827;
+  }
+  .open-list li.selected { outline: 2px solid #65a30d; }
+  .open-list .meta { font-size: 12px; color: #9ca3af; }
+  .empty { color: #9ca3af; font-size: 14px; }
+  .url-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    background: #111827;
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .url-row code {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: #d1d5db;
+  }
+  .preview {
+    margin-top: 16px;
+    background: #0b1020 repeating-conic-gradient(#111827 0% 25%, #0b1020 0% 50%) 50% / 24px 24px;
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+  }
+  .preview iframe { width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; transform: scale(var(--scale, 0.5)); }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .message { font-size: 14px; min-height: 1.2em; margin-top: 10px; }
+  .message.error { color: #f87171; }
+  .message.ok { color: #a3e635; }
+  .hidden { display: none; }
+  a { color: #a3e635; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>Placar — Partidas</header>
+
+<main>
+  <div>
+    <section>
+      <h2>Nova partida</h2>
+      <form id="create-form">
+        <label for="name">Nome da partida</label>
+        <input id="name" required placeholder="Final masculina">
+
+        <label for="best-of">Melhor de</label>
+        <select id="best-of">
+          <option value="1">1 set</option>
+          <option value="3" selected>3 sets</option>
+          <option value="5">5 sets</option>
+        </select>
+
+        <label for="team-0">Time 1 (jogadores separados por vírgula)</label>
+        <input id="team-0" placeholder="Erico, João">
+
+        <label for="team-1">Time 2 (jogadores separados por vírgula)</label>
+        <input id="team-1" placeholder="Pedro, Lucas">
+
+        <button class="primary" type="submit" id="create-button">Criar partida</button>
+      </form>
+      <div class="message" id="create-message"></div>
+    </section>
+
+    <section style="margin-top: 20px">
+      <div class="toolbar">
+        <h2>Partidas em aberto</h2>
+        <button class="small" id="refresh-button" type="button">Atualizar</button>
+      </div>
+      <ul class="open-list" id="open-list"></ul>
+      <div class="empty hidden" id="open-empty">Nenhuma partida em aberto.</div>
+    </section>
+  </div>
+
+  <section id="details">
+    <div class="empty" id="no-selection">Crie uma partida ou selecione uma da lista para ver as rotas e o overlay.</div>
+
+    <div id="selection" class="hidden">
+      <div class="toolbar">
+        <h2 id="selected-name"></h2>
+        <button class="danger small" id="finish-button" type="button">Finalizar partida</button>
+      </div>
+
+      <label>Overlay (use como fonte "Navegador" no OBS)</label>
+      <div class="url-row">
+        <code id="overlay-url"></code>
+        <button class="small" type="button" data-copy="overlay-url">Copiar</button>
+      </div>
+
+      <label>Painel de controle</label>
+      <div class="url-row">
+        <code id="control-url"></code>
+        <button class="small" type="button" data-copy="control-url">Copiar</button>
+      </div>
+      <p><a id="control-link" target="_blank" rel="noopener">Abrir painel de controle</a></p>
+
+      <div class="preview" aria-label="Prévia do overlay">
+        <iframe id="preview" title="Prévia do overlay" scrolling="no"></iframe>
+      </div>
+      <div class="message" id="details-message"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+  var selectedId = null;
+  var openGames = [];
+
+  function request(method, path, body) {
+    return fetch(path, {
+      method: method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t.trim()); });
+      return r.json();
+    });
+  }
+
+  function showMessage(id, text, kind) {
+    var el = document.getElementById(id);
+    el.textContent = text;
+    el.className = "message " + (kind || "");
+  }
+
+  function gameURL(id, page) {
+    return location.origin + "/scoreboard/" + id + "/" + page;
+  }
+
+  function loadOpenGames() {
+    return request("GET", "/api/games?status=open").then(function (games) {
+      openGames = games;
+      renderList();
+      // Keep the selection if the game is still open; otherwise clear it.
+      if (selectedId !== null && !games.some(function (g) { return g.id === selectedId; })) {
+        select(null);
+      }
+    }).catch(function (e) {
+      showMessage("create-message", "Erro ao carregar partidas: " + e.message, "error");
+    });
+  }
+
+  function renderList() {
+    var list = document.getElementById("open-list");
+    list.innerHTML = "";
+    document.getElementById("open-empty").classList.toggle("hidden", openGames.length > 0);
+
+    openGames.forEach(function (game) {
+      var item = document.createElement("li");
+      if (game.id === selectedId) item.className = "selected";
+
+      var info = document.createElement("div");
+      var title = document.createElement("div");
+      title.textContent = game.name;
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = "#" + game.id + " · " + new Date(game.createdAt).toLocaleString("pt-BR");
+      info.appendChild(title);
+      info.appendChild(meta);
+
+      var button = document.createElement("button");
+      button.className = "small";
+      button.type = "button";
+      button.textContent = game.id === selectedId ? "Selecionada" : "Selecionar";
+      button.disabled = game.id === selectedId;
+      button.onclick = function () { select(game.id); };
+
+      item.appendChild(info);
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+  }
+
+  // select shows the routes and the overlay preview of a game. The id is kept in the URL hash,
+  // so reloading the page keeps the selection.
+  function select(id) {
+    selectedId = id;
+    if (id === null) {
+      history.replaceState(null, "", location.pathname);
+    } else {
+      history.replaceState(null, "", "#" + id);
+    }
+    renderList();
+
+    document.getElementById("no-selection").classList.toggle("hidden", id !== null);
+    document.getElementById("selection").classList.toggle("hidden", id === null);
+    showMessage("details-message", "");
+    if (id === null) return;
+
+    var game = openGames.find(function (g) { return g.id === id; });
+    document.getElementById("selected-name").textContent = game ? game.name : "Partida #" + id;
+    document.getElementById("overlay-url").textContent = gameURL(id, "overlay");
+    document.getElementById("control-url").textContent = gameURL(id, "control");
+    document.getElementById("control-link").href = gameURL(id, "control");
+    document.getElementById("preview").src = gameURL(id, "overlay");
+  }
+
+  function fitPreview() {
+    var box = document.querySelector(".preview");
+    var scale = box.clientWidth / 1920;
+    box.style.setProperty("--scale", scale);
+  }
+
+  document.getElementById("create-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var button = document.getElementById("create-button");
+    var teams = [0, 1].map(function (i) {
+      var players = document.getElementById("team-" + i).value
+        .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      return { players: players };
+    });
+    var body = {
+      name: document.getElementById("name").value.trim(),
+      bestOf: parseInt(document.getElementById("best-of").value, 10),
+      teams: teams
+    };
+
+    button.disabled = true;
+    request("POST", "/api/games", body).then(function (game) {
+      document.getElementById("create-form").reset();
+      document.getElementById("best-of").value = "3";
+      showMessage("create-message", "Partida criada.", "ok");
+      return loadOpenGames().then(function () { select(game.id); });
+    }).catch(function (err) {
+      showMessage("create-message", err.message, "error");
+    }).finally(function () {
+      button.disabled = false;
+    });
+  });
+
+  document.getElementById("finish-button").addEventListener("click", function () {
+    if (selectedId === null) return;
+    if (!confirm("Finalizar esta partida? O placar não poderá mais ser alterado.")) return;
+
+    request("POST", "/api/games/" + selectedId + "/finish").then(function () {
+      showMessage("create-message", "Partida finalizada.", "ok");
+      select(null);
+      return loadOpenGames();
+    }).catch(function (err) {
+      showMessage("details-message", err.message, "error");
+    });
+  });
+
+  document.getElementById("refresh-button").addEventListener("click", loadOpenGames);
+
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var text = document.getElementById(button.dataset.copy).textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        button.textContent = "Copiado";
+        setTimeout(function () { button.textContent = "Copiar"; }, 1500);
+      });
+    });
+  });
+
+  window.addEventListener("resize", fitPreview);
+
+  // Start with the open games; then restore a selection from the URL hash.
+  loadOpenGames().then(function () {
+    fitPreview();
+    var fromHash = parseInt(location.hash.slice(1), 10);
+    if (openGames.some(function (g) { return g.id === fromHash; })) select(fromHash);
+  });
+</script>
+</body>
+</html>

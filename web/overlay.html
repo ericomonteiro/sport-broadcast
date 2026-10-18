@@ -37,7 +37,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Tennis ball marks the team serving. */
+  /* Tennis ball (resource/icons/tennis.svg) marks the team serving. */
   .serving::before {
     content: "";
     display: inline-block;
@@ -45,7 +45,7 @@
     height: 22px;
     margin-right: 10px;
     vertical-align: middle;
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%23d6ff3d'/%3E%3Cpath d='M4 3c4 4 4 14 0 18M20 3c-4 4-4 14 0 18' fill='none' stroke='%23ffffff' stroke-width='1.5'/%3E%3C/svg%3E") center / contain no-repeat;
+    background: url("/icons/tennis.svg") center / contain no-repeat;
   }
   .sets, .games, .points {
     text-align: center;
@@ -64,6 +64,9 @@
     background: rgba(255, 255, 255, 0.03);
   }
   .hidden { display: none; }
+  /* One-set matches have no sets to show: drop the sets column and the sets history. */
+  .single-set .sets, .single-set .history { display: none; }
+  .single-set .row { grid-template-columns: 1fr 90px 90px; }
 </style>
 </head>
 <body>
@@ -84,7 +87,12 @@
 </div>
 
 <script>
+  // The game id is the second segment of the path: /scoreboard/<id>/overlay
+  var base = "/api/scoreboard/" + location.pathname.split("/")[2];
+
   function render(view) {
+    document.getElementById("scoreboard").classList.toggle("single-set", view.bestOf === 1);
+
     [0, 1].forEach(function (i) {
       var name = document.getElementById("name-" + i);
       name.textContent = view.teams[i].players.join(" / ");
@@ -107,7 +115,7 @@
 
   // Initial state and real-time updates via SSE.
   // EventSource reconnects on its own if the server goes down.
-  var events = new EventSource("/events");
+  var events = new EventSource(base + "/events");
   events.onmessage = function (e) { render(JSON.parse(e.data)); };
 </script>
 </body>

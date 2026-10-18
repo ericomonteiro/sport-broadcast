@@ -12,3 +12,6 @@ coverage.out
 
 # macOS
 .DS_Store
+
+# Local configuration (may contain credentials)
+application-local.properties

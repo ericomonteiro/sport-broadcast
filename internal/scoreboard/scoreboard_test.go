@@ -1,6 +1,9 @@
 package scoreboard
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func newTestScoreboard(t *testing.T, bestOf int) *Scoreboard {
 	t.Helper()
@@ -264,4 +267,55 @@ func TestUndoRevertsCorrections(t *testing.T) {
 	if v := s.State().View(); len(v.Sets) != 0 || v.SetsWon != [2]int{0, 0} {
 		t.Fatalf("expected undo to revert AddSet, got %+v", v)
 	}
+}
+
+func TestSnapshotRoundTrip(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	s.AddSet(0)
+	s.AddGame(1)
+	s.Point(1)
+	s.SwitchServe()
+
+	restored, err := RestoreMatch(s.State().Snapshot())
+	if err != nil {
+		t.Fatalf("RestoreMatch: %v", err)
+	}
+	if got, want := restored.View(), s.State().View(); !equalViews(got, want) {
+		t.Fatalf("round trip changed the match:\n got  %+v\n want %+v", got, want)
+	}
+}
+
+func TestRestoreMatchRejectsInvalidSnapshot(t *testing.T) {
+	base := newTestScoreboard(t, 3).State().Snapshot()
+
+	tooManySets := base
+	tooManySets.Sets = make([][2]int, maxSets+1)
+	if _, err := RestoreMatch(tooManySets); err == nil {
+		t.Fatalf("expected error for too many sets")
+	}
+
+	badServing := base
+	badServing.Serving = 2
+	if _, err := RestoreMatch(badServing); err != ErrInvalidTeam {
+		t.Fatalf("expected ErrInvalidTeam for serving=2, got %v", err)
+	}
+
+	badBestOf := base
+	badBestOf.BestOf = 4
+	if _, err := RestoreMatch(badBestOf); err != ErrInvalidBestOf {
+		t.Fatalf("expected ErrInvalidBestOf, got %v", err)
+	}
+}
+
+func equalViews(a, b View) bool {
+	if len(a.Sets) != len(b.Sets) {
+		return false
+	}
+	for i := range a.Sets {
+		if a.Sets[i] != b.Sets[i] {
+			return false
+		}
+	}
+	a.Sets, b.Sets = nil, nil
+	return fmt.Sprintf("%+v", a) == fmt.Sprintf("%+v", b)
 }
