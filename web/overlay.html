@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Scoreboard - Overlay</title>
+<style>
+  /* Transparent background: OBS draws the video underneath. */
+  html, body {
+    margin: 0;
+    background: transparent;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: #fff;
+    overflow: hidden;
+  }
+  .scoreboard {
+    position: absolute;
+    left: 40px;
+    top: 40px;
+    width: 760px;
+    background: rgba(12, 18, 32, 0.88);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 200px 90px 90px;
+    align-items: center;
+    height: 62px;
+    padding: 0 20px;
+  }
+  .row + .row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  .name {
+    font-size: 26px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .serving::before {
+    content: "●";
+    color: #d6ff3d;
+    margin-right: 10px;
+    font-size: 18px;
+    vertical-align: middle;
+  }
+  .sets, .games, .points {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .sets { color: #d6ff3d; }
+  .points { background: rgba(255, 255, 255, 0.06); height: 100%; line-height: 62px; }
+  .history {
+    display: flex;
+    gap: 14px;
+    padding: 6px 20px;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="scoreboard" id="scoreboard">
+  <div class="row" id="row-0">
+    <div class="name" id="name-0"></div>
+    <div class="sets" id="sets-0"></div>
+    <div class="games" id="games-0"></div>
+    <div class="points" id="points-0"></div>
+  </div>
+  <div class="row" id="row-1">
+    <div class="name" id="name-1"></div>
+    <div class="sets" id="sets-1"></div>
+    <div class="games" id="games-1"></div>
+    <div class="points" id="points-1"></div>
+  </div>
+  <div class="history" id="history"></div>
+</div>
+
+<script>
+  function render(view) {
+    [0, 1].forEach(function (i) {
+      var name = document.getElementById("name-" + i);
+      name.textContent = view.teams[i].players.join(" / ");
+      name.classList.toggle("serving", view.serving === i && view.winner < 0);
+
+      document.getElementById("sets-" + i).textContent = view.setsWon[i];
+      document.getElementById("games-" + i).textContent = view.games[i];
+      document.getElementById("points-" + i).textContent = view.points[i];
+    });
+
+    var history = document.getElementById("history");
+    history.innerHTML = "";
+    view.sets.forEach(function (set) {
+      var span = document.createElement("span");
+      span.textContent = set[0] + "-" + set[1];
+      history.appendChild(span);
+    });
+    history.classList.toggle("hidden", view.sets.length === 0);
+  }
+
+  // Initial state and real-time updates via SSE.
+  // EventSource reconnects on its own if the server goes down.
+  var events = new EventSource("/events");
+  events.onmessage = function (e) { render(JSON.parse(e.data)); };
+</script>
+</body>
+</html>

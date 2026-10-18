@@ -1,0 +1,14 @@
+# Binaries
+/broadcast
+*.exe
+*.test
+
+# Test coverage
+*.out
+coverage.out
+
+# GoLand / IntelliJ
+.idea/
+
+# macOS
+.DS_Store

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoreboard - Painel de controle</title>
+<style>
+  body {
+    margin: 0;
+    padding: 20px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #111827;
+    color: #f3f4f6;
+  }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .teams { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .team {
+    background: #1f2937;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .team-score {
+    font-size: 48px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin: 8px 0;
+  }
+  .summary { font-size: 14px; color: #9ca3af; }
+  button {
+    font: inherit;
+    border: 0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 4px 4px 4px 0;
+    background: #374151;
+    color: #f3f4f6;
+    cursor: pointer;
+  }
+  button:hover { background: #4b5563; }
+  button.primary { background: #65a30d; color: #fff; font-size: 18px; width: 100%; }
+  button.danger { background: #7f1d1d; }
+  .actions { margin-top: 16px; }
+  .names { margin-top: 20px; background: #1f2937; border-radius: 10px; padding: 16px; }
+  .names label { display: block; font-size: 13px; color: #9ca3af; margin-top: 10px; }
+  .names input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #374151;
+    background: #111827;
+    color: #f3f4f6;
+  }
+  .error { color: #f87171; margin-top: 12px; min-height: 1em; }
+</style>
+</head>
+<body>
+<h1>Placar ao vivo</h1>
+
+<div class="teams">
+  <div class="team">
+    <div class="summary" id="summary-0"></div>
+    <div class="team-score" id="points-0">0</div>
+    <button class="primary" onclick="point(0)">+ Ponto</button>
+    <button onclick="switchServe()">Trocar saque</button>
+  </div>
+  <div class="team">
+    <div class="summary" id="summary-1"></div>
+    <div class="team-score" id="points-1">0</div>
+    <button class="primary" onclick="point(1)">+ Ponto</button>
+    <button onclick="switchServe()">Trocar saque</button>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="danger" onclick="undo()">Desfazer último ponto</button>
+  <button onclick="reset()">Novo jogo (melhor de <span id="best-of">3</span>)</button>
+</div>
+
+<div class="names">
+  <strong>Atletas</strong>
+  <label>Time 1 (separe os nomes com vírgula)</label>
+  <input id="team-input-0" placeholder="Erico, João">
+  <label>Time 2 (separe os nomes com vírgula)</label>
+  <input id="team-input-1" placeholder="Pedro, Lucas">
+  <button onclick="saveTeams()" style="margin-top:12px">Salvar nomes</button>
+</div>
+
+<div class="error" id="error"></div>
+
+<script>
+  var bestOf = 3;
+
+  function send(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t.trim()); });
+      return r.json();
+    }).then(function (view) {
+      document.getElementById("error").textContent = "";
+      render(view);
+    }).catch(function (e) {
+      document.getElementById("error").textContent = e.message;
+    });
+  }
+
+  function point(team) { send("/api/point", { team: team }); }
+  function switchServe() { send("/api/serve", {}); }
+  function undo() { send("/api/undo", {}); }
+  function reset() {
+    if (confirm("Zerar o placar atual? Os nomes serão mantidos.")) {
+      send("/api/reset", { bestOf: bestOf });
+    }
+  }
+
+  function saveTeams() {
+    var teams = [0, 1].map(function (i) {
+      var text = document.getElementById("team-input-" + i).value;
+      var players = text.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      return { players: players };
+    });
+    send("/api/teams", { teams: teams });
+  }
+
+  function render(view) {
+    bestOf = view.bestOf;
+    document.getElementById("best-of").textContent = view.bestOf;
+
+    [0, 1].forEach(function (i) {
+      var marker = view.serving === i && view.winner < 0 ? " · sacando" : "";
+      document.getElementById("summary-" + i).textContent =
+        view.teams[i].players.join(" / ") + marker + " · sets " + view.setsWon[i] +
+        " · games " + view.games[i];
+      document.getElementById("points-" + i).textContent = view.points[i];
+
+      var input = document.getElementById("team-input-" + i);
+      if (document.activeElement !== input) {
+        input.value = view.teams[i].players.join(", ");
+      }
+    });
+
+    if (view.winner >= 0) {
+      document.getElementById("error").textContent = "Partida encerrada. Vencedor: " + view.teams[view.winner].players.join(" / ");
+    }
+  }
+
+  // Syncs with the server and updates when another panel changes the score.
+  var events = new EventSource("/events");
+  events.onmessage = function (e) { render(JSON.parse(e.data)); };
+</script>
+</body>
+</html>
