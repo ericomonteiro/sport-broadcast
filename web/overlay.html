@@ -37,12 +37,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Tennis ball (resource/icons/tennis.svg) marks the team serving. */
   .serving::before {
-    content: "●";
-    color: #d6ff3d;
+    content: "";
+    display: inline-block;
+    width: 22px;
+    height: 22px;
     margin-right: 10px;
-    font-size: 18px;
     vertical-align: middle;
+    background: url("/icons/tennis.svg") center / contain no-repeat;
   }
   .sets, .games, .points {
     text-align: center;
@@ -61,6 +64,9 @@
     background: rgba(255, 255, 255, 0.03);
   }
   .hidden { display: none; }
+  /* One-set matches have no sets to show: drop the sets column and the sets history. */
+  .single-set .sets, .single-set .history { display: none; }
+  .single-set .row { grid-template-columns: 1fr 90px 90px; }
 </style>
 </head>
 <body>
@@ -81,7 +87,12 @@
 </div>
 
 <script>
+  // The game id is the second segment of the path: /scoreboard/<id>/overlay
+  var base = "/api/scoreboard/" + location.pathname.split("/")[2];
+
   function render(view) {
+    document.getElementById("scoreboard").classList.toggle("single-set", view.bestOf === 1);
+
     [0, 1].forEach(function (i) {
       var name = document.getElementById("name-" + i);
       name.textContent = view.teams[i].players.join(" / ");
@@ -104,7 +115,7 @@
 
   // Initial state and real-time updates via SSE.
   // EventSource reconnects on its own if the server goes down.
-  var events = new EventSource("/events");
+  var events = new EventSource(base + "/events");
   events.onmessage = function (e) { render(JSON.parse(e.data)); };
 </script>
 </body>

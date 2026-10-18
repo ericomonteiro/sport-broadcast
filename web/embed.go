@@ -3,5 +3,5 @@ package web
 
 import "embed"
 
-//go:embed overlay.html control.html
+//go:embed index.html overlay.html control.html
 var Files embed.FS

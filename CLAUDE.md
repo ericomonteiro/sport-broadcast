@@ -4,35 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Go 1.24, standard library only (no external dependencies). Git repository on branch `master`, no commits yet. No linter config exists; use `gofmt` and `go vet`.
+Go 1.25 (the `go` directive in `go.mod` is 1.25.0, required by pgx v5.11). The only external dependency is `github.com/jackc/pgx/v5`. Postgres runs in Docker. Git repository on branch `master`. No linter config exists; use `gofmt` and `go vet`.
 
 ```bash
-go run ./cmd/broadcast -addr :8080 -best-of 3   # start the server
-go build ./cmd/broadcast                        # build the binary
-go test ./...                                   # run all tests
-go test ./internal/scoreboard -run TestUndo     # run a single test
-gofmt -l -w .                                   # format
-go vet ./...                                    # static checks
+docker compose up -d                                  # start Postgres (localhost:5432)
+ENVIRONMENT=local go run ./cmd/broadcast              # start the server (reads application-local.properties)
+go build ./cmd/broadcast                              # build the binary
+go test ./...                                         # all tests; they use in-memory fakes, no database needed
+go test ./internal/scoreboard -run TestUndo           # run a single test
+gofmt -l -w .                                         # format
+go vet ./...                                          # static checks
 ```
+
+`application-local.properties` is git-ignored; `application-local.properties.example` is the committed template.
 
 ## Architecture
 
-The app is a live scoreboard for beach tennis broadcasts. An operator changes the score in a control page; OBS shows an overlay page through a Browser Source, and the overlay updates in real time.
+The app is a live scoreboard for beach tennis broadcasts. Each game has an ID and its own overlay and control pages. An operator changes the score in the control page; OBS shows the overlay of that game through a Browser Source, and the overlay updates in real time. Scores are saved to Postgres.
 
-Three layers:
+Layers, from the inside out:
 
-- **`internal/scoreboard`**: pure scoring rules, no I/O. `Match` is the state, and it only uses fixed-size arrays so it can be copied by value. `Scoreboard` wraps the current `Match` plus a history of snapshots, which powers undo. The rules (games, sets, tie-break, best-of) are hardcoded here and documented in the package comment. `Match.View()` converts the state into display strings (`"0"`, `"15"`, `"40"`, `"Vant."`) and is the JSON shape sent to the browser.
-- **`internal/server`**: HTTP layer. A single `sync.Mutex` guards the `Scoreboard`. Every successful POST calls `broadcast()`, which pushes the new `View` to every SSE client (`/events`). Each client has a buffered channel of size 8; if it is full, the oldest message is dropped, because only the latest state matters. The `/events` handler sends the current state immediately on connect, so a reconnecting page is always in sync.
-- **`web/`**: HTML pages embedded in the binary with `embed.FS`. `overlay.html` (transparent background, meant for OBS) and `control.html` (operator panel). Both pages render the same `View` JSON and listen to `/events`.
+- **`internal/scoreboard`**: pure scoring rules, no I/O. `Match` is the state and only uses fixed-size arrays so it can be copied by value. `Scoreboard` wraps the current `Match` plus a history of snapshots, which powers undo. `Match.View()` converts the state into display strings and is the JSON the browser receives. `Match.Snapshot()` / `RestoreMatch()` convert to and from the storable `Snapshot` (the only persistence path, because `Match` has private fields).
+- **`internal/config`**: loads settings. The file is `application-<ENVIRONMENT>.properties` (`ENVIRONMENT=local` → `application-local.properties`). Environment variables override file values, using the key in upper case with `_` (`db.host` → `DB_HOST`). `DatabaseURL()` builds the Postgres URL.
+- **`internal/infra/database`**: connection pool (`pgxpool`) and schema. `Migrate` runs the `CREATE TABLE IF NOT EXISTS` statements on every start; there is no migration tool.
+- **`internal/model`**: entities. `Game` (ID is the one in the URLs; `FinishedAt` nil means open) and `Scoreboard` (one per game, FK `game_id`, holds the `Snapshot` as JSONB).
+- **`internal/repository`**: queries (only the services call it). `Games.Create` inserts a game and its scoreboard in one transaction. `ErrNotFound` is the only sentinel; wrapped errors must be checked with `errors.Is`.
+- **`internal/service`**: application rules, no HTTP. It depends on the `GameStore` and `ScoreboardStore` interfaces (`store.go`), not on the concrete repositories. `GameService` creates, lists, finishes games (validates input, returns `ValidationError` for bad input). `ScoreboardService` holds the live scoreboards: each game is loaded from the DB on first use and kept in memory; `change()` checks the game is not finished, applies the rule, saves with `SaveState` (on failure it drops the cached copy so the next call reloads), then notifies subscribers. Subscribers get a buffered channel (size 8; oldest dropped when full). A single `sync.Mutex` guards the cache and subscribers. Service errors: `ErrNotFound`, `ErrGameFinished`, `ValidationError` (its message is shown to the operator).
+- **`internal/handler`**: HTTP only. Parses requests, calls the services, maps errors to status codes (`ValidationError` → 422, `ErrNotFound` → 404, anything else → 500, logged), writes JSON and SSE. Holds no business rules; a new rule goes in `service`.
+- **`resource/`**: static assets embedded with `embed.FS` (`resource/icons/*.svg`), served under `GET /icons/`. The overlay uses `/icons/tennis.svg` as the serving marker.
+- **`web/`**: HTML pages embedded with `embed.FS`. `index.html` (create/select/finish matches), `overlay.html` (transparent background, for OBS) and `control.html`. Both read the game ID from the path (`location.pathname.split("/")[2]`) and build the API base `/api/scoreboard/<id>`.
 
-The `cmd/broadcast/main.go` entry point wires the pieces: `NewMatch` → `NewScoreboard` → `server.New` → `ListenAndServe`.
+`cmd/broadcast/main.go` wires it: `config.Load` → `database.Connect` → `database.Migrate` → `repository.New*` → `service.New*` → `handler.New` → `ListenAndServe(h.Routes())`.
 
 ### Things that are easy to get wrong
 
-- **JSON field names are a contract with the HTML.** Renaming a `View` field (`json` tag in `scoreboard.go`) requires updating the JavaScript in `overlay.html` and `control.html`.
-- **Undo does not restore team names.** Names are not part of the history; `Undo()` keeps the current `Teams`. `Reset()` keeps names too.
+- **JSON field names are a contract with the HTML.** Renaming a `View` or `Snapshot` field (`json` tags) requires updating `overlay.html` and `control.html`. Snapshot field names are also stored in the JSONB column, so renaming them breaks existing rows.
+- **Finished games reject changes.** `finished_at` is set by `POST /api/games/{id}/finish` (idempotent). `ScoreboardService.change()` checks it on every change and returns `422 match is finished`. The overlay of a finished game still loads.
+- **Undo history is in memory only.** It is not stored, so it is lost on restart (the saved score is kept). `Undo()` keeps the current team names.
 - **Serve is manual.** `SwitchServe()` is never automatic, because the rotation rules are not implemented.
-- **Routes:** `GET /scoreboard/overlay` (OBS source), `GET /control`, `GET /state`, `GET /events`, and `POST /api/point`, `/api/serve`, `/api/undo`, `/api/teams`, `/api/reset`. Errors are `400` for invalid JSON and `422` for rule violations.
+- **Routes:** `GET /` (match list: create, select, finish), `GET /scoreboard/{id}/overlay` (OBS source), `GET /scoreboard/{id}/control`, `GET /api/games` (`?status=open` for open only), `GET /api/games/{id}`, `POST /api/games/{id}/finish`, `POST /api/games` (`{name, bestOf, teams}`), and per-game `GET /api/scoreboard/{id}/state` and `/events`, `POST /api/scoreboard/{id}/{point|games/add|games/remove|sets/add|sets/remove|serve|undo|teams|reset}`. Errors: `400` invalid id or JSON, `404` unknown game, `422` rule violation or invalid input, `500` database errors (logged, not shown).
+- **Tests never touch the real database.** `internal/service` tests use `memoryStore` (`memory_store_test.go`), an in-memory fake of `GameStore`/`ScoreboardStore`. Do not add tests that connect to Postgres. SQL in `internal/repository` has no automated test; it was checked manually against the running database.
 
 ## Conventions
 

@@ -15,9 +15,11 @@ import (
 const maxSets = 5
 
 var (
-	ErrMatchOver     = errors.New("match is already over")
-	ErrInvalidTeam   = errors.New("invalid team")
-	ErrInvalidBestOf = errors.New("bestOf must be 1, 3 or 5")
+	ErrMatchOver          = errors.New("match is already over")
+	ErrInvalidTeam        = errors.New("invalid team")
+	ErrInvalidBestOf      = errors.New("bestOf must be 1, 3 or 5")
+	ErrNothingToRemove    = errors.New("nothing to remove")
+	ErrTieBreakInProgress = errors.New("cannot change games during a tie-break")
 )
 
 // Team is a pair of players (or a single player in singles).
@@ -54,11 +56,8 @@ func NewMatch(teams [2]Team, bestOf int) (Match, error) {
 
 // Point awards a point to the given team (0 or 1).
 func (m *Match) Point(team int) error {
-	if m.Winner >= 0 {
-		return ErrMatchOver
-	}
-	if team != 0 && team != 1 {
-		return ErrInvalidTeam
+	if err := m.checkPlayable(team); err != nil {
+		return err
 	}
 
 	other := 1 - team
@@ -77,6 +76,69 @@ func (m *Match) Point(team int) error {
 	return nil
 }
 
+// AddGame gives the team a game, as if it had been won on the court.
+// It follows the same rules as a game won by points, so it can close a set.
+func (m *Match) AddGame(team int) error {
+	if err := m.checkPlayable(team); err != nil {
+		return err
+	}
+	if m.TieBreak {
+		return ErrTieBreakInProgress
+	}
+	m.winGame(team)
+	return nil
+}
+
+// RemoveGame takes one game away from the team in the current set (correction).
+func (m *Match) RemoveGame(team int) error {
+	if err := m.checkPlayable(team); err != nil {
+		return err
+	}
+	if m.TieBreak {
+		return ErrTieBreakInProgress
+	}
+	if m.Games[team] == 0 {
+		return ErrNothingToRemove
+	}
+	m.Games[team]--
+	m.Points = [2]int{}
+	return nil
+}
+
+// AddSet gives the team the current set, with the usual final score
+// (6-x, 7-5 or 7-6). The current games are replaced by that score.
+func (m *Match) AddSet(team int) error {
+	if err := m.checkPlayable(team); err != nil {
+		return err
+	}
+	other := 1 - team
+	m.TieBreak = false
+	if m.Games[other] >= 6 {
+		m.Games[team] = 7
+	} else {
+		m.Games[team] = max(6, m.Games[other]+2)
+	}
+	m.winSet(team)
+	return nil
+}
+
+// RemoveSet removes the most recent set won by the team (correction).
+// The match can be reopened this way.
+func (m *Match) RemoveSet(team int) error {
+	if team != 0 && team != 1 {
+		return ErrInvalidTeam
+	}
+	for i := m.numSets - 1; i >= 0; i-- {
+		if setWinner(m.sets[i]) == team {
+			copy(m.sets[i:], m.sets[i+1:m.numSets])
+			m.numSets--
+			m.recomputeWinner()
+			return nil
+		}
+	}
+	return ErrNothingToRemove
+}
+
 // SwitchServe passes the serve to the other team. It is manual on purpose,
 // because the operator knows best when the serve changes.
 func (m *Match) SwitchServe() {
@@ -87,13 +149,36 @@ func (m *Match) SwitchServe() {
 func (m Match) SetsWon() [2]int {
 	var won [2]int
 	for i := 0; i < m.numSets; i++ {
-		if m.sets[i][0] > m.sets[i][1] {
-			won[0]++
-		} else {
-			won[1]++
-		}
+		won[setWinner(m.sets[i])]++
 	}
 	return won
+}
+
+func (m Match) checkPlayable(team int) error {
+	if m.Winner >= 0 {
+		return ErrMatchOver
+	}
+	if team != 0 && team != 1 {
+		return ErrInvalidTeam
+	}
+	return nil
+}
+
+func setWinner(set [2]int) int {
+	if set[0] > set[1] {
+		return 0
+	}
+	return 1
+}
+
+func (m *Match) recomputeWinner() {
+	won := m.SetsWon()
+	m.Winner = -1
+	for team := range won {
+		if won[team] > m.BestOf/2 {
+			m.Winner = team
+		}
+	}
 }
 
 func (m *Match) winGame(team int) {
@@ -122,9 +207,7 @@ func (m *Match) winSet(team int) {
 	m.Points = [2]int{}
 	m.TieBreak = false
 
-	if m.SetsWon()[team] > m.BestOf/2 {
-		m.Winner = team
-	}
+	m.recomputeWinner()
 }
 
 // View is the match in display format, used by the overlay and the control panel (JSON).
@@ -192,11 +275,36 @@ func NewScoreboard(m Match) *Scoreboard {
 
 // Point records a point and saves the previous state for undo.
 func (s *Scoreboard) Point(team int) error {
-	previous := s.current
-	if err := s.current.Point(team); err != nil {
+	return s.apply(func(m *Match) error { return m.Point(team) })
+}
+
+// AddGame, RemoveGame, AddSet and RemoveSet are manual corrections. They are
+// saved in the history too, so Undo reverts them.
+func (s *Scoreboard) AddGame(team int) error {
+	return s.apply(func(m *Match) error { return m.AddGame(team) })
+}
+
+func (s *Scoreboard) RemoveGame(team int) error {
+	return s.apply(func(m *Match) error { return m.RemoveGame(team) })
+}
+
+func (s *Scoreboard) AddSet(team int) error {
+	return s.apply(func(m *Match) error { return m.AddSet(team) })
+}
+
+func (s *Scoreboard) RemoveSet(team int) error {
+	return s.apply(func(m *Match) error { return m.RemoveSet(team) })
+}
+
+// apply runs the change on a copy and only commits it (and saves the
+// previous state) if it succeeds.
+func (s *Scoreboard) apply(change func(*Match) error) error {
+	next := s.current
+	if err := change(&next); err != nil {
 		return err
 	}
-	s.history = append(s.history, previous)
+	s.history = append(s.history, s.current)
+	s.current = next
 	return nil
 }
 
