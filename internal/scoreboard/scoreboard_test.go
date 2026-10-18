@@ -173,3 +173,95 @@ func TestResetKeepsTeamNames(t *testing.T) {
 		t.Fatalf("unexpected reset: %+v", v)
 	}
 }
+
+func TestAddGameClosesSet(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	for i := 0; i < 5; i++ {
+		s.AddGame(0)
+	}
+	if v := s.State().View(); v.Games != [2]int{5, 0} || len(v.Sets) != 0 {
+		t.Fatalf("expected games 5-0 with no set, got games=%v sets=%v", v.Games, v.Sets)
+	}
+
+	s.AddGame(0)
+	if v := s.State().View(); len(v.Sets) != 1 || v.Sets[0] != [2]int{6, 0} {
+		t.Fatalf("expected set 6-0 after sixth game, got %v", v.Sets)
+	}
+}
+
+func TestAddGameDuringTieBreakIsRejected(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	for i := 0; i < 6; i++ {
+		winGame(t, s, 0)
+		winGame(t, s, 1)
+	}
+	if err := s.AddGame(0); err != ErrTieBreakInProgress {
+		t.Fatalf("expected ErrTieBreakInProgress, got %v", err)
+	}
+}
+
+func TestRemoveGame(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	if err := s.RemoveGame(0); err != ErrNothingToRemove {
+		t.Fatalf("expected ErrNothingToRemove on 0 games, got %v", err)
+	}
+
+	s.AddGame(0)
+	s.AddGame(0)
+	s.RemoveGame(0)
+	if v := s.State().View(); v.Games != [2]int{1, 0} {
+		t.Fatalf("expected games 1-0, got %v", v.Games)
+	}
+}
+
+func TestAddSetUsesFinalScore(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	s.AddGame(1)
+	s.AddGame(1)
+	s.AddSet(0)
+	if v := s.State().View(); len(v.Sets) != 1 || v.Sets[0] != [2]int{6, 2} || v.SetsWon != [2]int{1, 0} {
+		t.Fatalf("expected set 6-2 for team 0, got sets=%v setsWon=%v", v.Sets, v.SetsWon)
+	}
+
+	// Tie-break case: 6-6 then the team wins the set -> 7-6.
+	s = newTestScoreboard(t, 3)
+	for i := 0; i < 6; i++ {
+		winGame(t, s, 0)
+		winGame(t, s, 1)
+	}
+	s.AddSet(1)
+	if v := s.State().View(); len(v.Sets) != 1 || v.Sets[0] != [2]int{6, 7} || v.TieBreak {
+		t.Fatalf("expected set 6-7 with tie-break closed, got sets=%v tieBreak=%v", v.Sets, v.TieBreak)
+	}
+}
+
+func TestAddSetCanFinishMatch(t *testing.T) {
+	s := newTestScoreboard(t, 1)
+	s.AddSet(1)
+	if v := s.State().View(); v.Winner != 1 {
+		t.Fatalf("expected team 1 to win a best-of-1 match, got winner %d", v.Winner)
+	}
+}
+
+func TestRemoveSetReopensMatch(t *testing.T) {
+	s := newTestScoreboard(t, 1)
+	s.AddSet(0)
+	if err := s.RemoveSet(1); err != ErrNothingToRemove {
+		t.Fatalf("expected ErrNothingToRemove for team without sets, got %v", err)
+	}
+	if err := s.RemoveSet(0); err != nil {
+		t.Fatalf("RemoveSet: %v", err)
+	}
+	if v := s.State().View(); len(v.Sets) != 0 || v.Winner != -1 {
+		t.Fatalf("expected match reopened with no sets, got %+v", v)
+	}
+}
+
+func TestUndoRevertsCorrections(t *testing.T) {
+	s := newTestScoreboard(t, 3)
+	s.AddSet(0)
+	s.Undo()
+	if v := s.State().View(); len(v.Sets) != 0 || v.SetsWon != [2]int{0, 0} {
+		t.Fatalf("expected undo to revert AddSet, got %+v", v)
+	}
+}

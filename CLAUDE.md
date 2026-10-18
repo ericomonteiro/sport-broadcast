@@ -32,7 +32,7 @@ The `cmd/broadcast/main.go` entry point wires the pieces: `NewMatch` → `NewSco
 - **JSON field names are a contract with the HTML.** Renaming a `View` field (`json` tag in `scoreboard.go`) requires updating the JavaScript in `overlay.html` and `control.html`.
 - **Undo does not restore team names.** Names are not part of the history; `Undo()` keeps the current `Teams`. `Reset()` keeps names too.
 - **Serve is manual.** `SwitchServe()` is never automatic, because the rotation rules are not implemented.
-- **Routes:** `GET /scoreboard/overlay` (OBS source), `GET /control`, `GET /state`, `GET /events`, and `POST /api/point`, `/api/serve`, `/api/undo`, `/api/teams`, `/api/reset`. Errors are `400` for invalid JSON and `422` for rule violations.
+- **Routes:** `GET /scoreboard/overlay` (OBS source), `GET /control`, `GET /state`, `GET /events`, and `POST /api/point`, `/api/games/add`, `/api/games/remove`, `/api/sets/add`, `/api/sets/remove`, `/api/serve`, `/api/undo`, `/api/teams`, `/api/reset`. Game/set routes take `{"team": 0|1}`. Errors are `400` for invalid JSON and `422` for rule violations.
 
 ## Conventions
 

@@ -37,12 +37,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Tennis ball marks the team serving. */
   .serving::before {
-    content: "●";
-    color: #d6ff3d;
+    content: "";
+    display: inline-block;
+    width: 22px;
+    height: 22px;
     margin-right: 10px;
-    font-size: 18px;
     vertical-align: middle;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%23d6ff3d'/%3E%3Cpath d='M4 3c4 4 4 14 0 18M20 3c-4 4-4 14 0 18' fill='none' stroke='%23ffffff' stroke-width='1.5'/%3E%3C/svg%3E") center / contain no-repeat;
   }
   .sets, .games, .points {
     text-align: center;

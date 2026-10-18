@@ -40,6 +40,8 @@ go build -o broadcast ./cmd/broadcast
 Abra `http://localhost:8080/control` em outra aba ou em outro dispositivo na mesma rede.
 
 - **+ Ponto:** registra um ponto para o time.
+- **+ Game / − Game:** adiciona ou remove um game do time. Adicionar um game segue as mesmas regras de um game vencido na quadra, então pode fechar o set.
+- **+ Set / − Set:** dá o set ao time, com placar final (6-x, 7-5 ou 7-6), ou remove o último set vencido por ele. Use para corrigir o placar.
 - **Trocar saque:** passa o saque para o outro time. A troca é sempre manual.
 - **Desfazer último ponto:** volta um ponto. Os nomes dos atletas não são afetados.
 - **Novo jogo:** zera o placar e mantém os nomes.
@@ -79,6 +81,10 @@ go test ./...
 | GET | `/state` | Estado atual da partida (JSON) |
 | GET | `/events` | Stream SSE com as atualizações |
 | POST | `/api/point` | Registra ponto. Corpo: `{"team": 0}` ou `{"team": 1}` |
+| POST | `/api/games/add` | Adiciona um game ao time. Corpo: `{"team": 0}` ou `{"team": 1}` |
+| POST | `/api/games/remove` | Remove um game do time (correção) |
+| POST | `/api/sets/add` | Dá o set ao time, com placar final (6-x, 7-5 ou 7-6). Corpo: `{"team": 0}` ou `{"team": 1}` |
+| POST | `/api/sets/remove` | Remove o último set vencido pelo time (correção) |
 | POST | `/api/serve` | Troca o saque |
 | POST | `/api/undo` | Desfaz o último ponto |
 | POST | `/api/teams` | Altera os nomes. Corpo: `{"teams": [{"players": ["..."]}, {"players": ["..."]}]}` |

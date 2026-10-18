@@ -46,6 +46,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/point", s.withBody(func(w http.ResponseWriter, b requestBody) {
 		s.apply(w, func() error { return s.scoreboard.Point(b.Team) })
 	}))
+	mux.HandleFunc("POST /api/games/add", s.withBody(func(w http.ResponseWriter, b requestBody) {
+		s.apply(w, func() error { return s.scoreboard.AddGame(b.Team) })
+	}))
+	mux.HandleFunc("POST /api/games/remove", s.withBody(func(w http.ResponseWriter, b requestBody) {
+		s.apply(w, func() error { return s.scoreboard.RemoveGame(b.Team) })
+	}))
+	mux.HandleFunc("POST /api/sets/add", s.withBody(func(w http.ResponseWriter, b requestBody) {
+		s.apply(w, func() error { return s.scoreboard.AddSet(b.Team) })
+	}))
+	mux.HandleFunc("POST /api/sets/remove", s.withBody(func(w http.ResponseWriter, b requestBody) {
+		s.apply(w, func() error { return s.scoreboard.RemoveSet(b.Team) })
+	}))
 	mux.HandleFunc("POST /api/serve", s.withBody(func(w http.ResponseWriter, _ requestBody) {
 		s.apply(w, func() error {
 			s.scoreboard.SwitchServe()
