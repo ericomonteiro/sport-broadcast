@@ -8,3 +8,14 @@ db.user=broadcast
 db.password=broadcast
 db.name=broadcast
 db.sslmode=disable
+
+# OBS WebSocket (OBS > Tools > WebSocket Server Settings). Prefer OBS_PASSWORD in the environment
+# so the password is not stored in a file.
+obs.addr=localhost:4455
+obs.password=
+# Scene where saved replays play, and the media source inside it. Scene and source names must
+# differ: OBS shares one namespace for both.
+obs.replay.scene=Replay
+obs.replay.source=Replay Clip
+# Media source in the replay scene that plays before each clip.
+obs.replay.intro=Replay Intro

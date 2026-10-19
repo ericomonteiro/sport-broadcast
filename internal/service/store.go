@@ -23,3 +23,9 @@ type ScoreboardStore interface {
 	FindByGameID(ctx context.Context, gameID int64) (model.Scoreboard, error)
 	SaveState(ctx context.Context, gameID int64, state scoreboard.Snapshot) error
 }
+
+// ReplaySaver asks the broadcast software to save its replay buffer.
+// The OBS adapter (internal/infra/obs) implements it; tests use a fake.
+type ReplaySaver interface {
+	SaveReplay() error
+}

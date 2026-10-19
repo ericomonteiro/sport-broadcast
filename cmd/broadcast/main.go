@@ -18,6 +18,7 @@ import (
 	"broadcast/internal/config"
 	"broadcast/internal/handler"
 	"broadcast/internal/infra/database"
+	"broadcast/internal/infra/obs"
 	"broadcast/internal/repository"
 	"broadcast/internal/service"
 )
@@ -28,7 +29,8 @@ func main() {
 		log.Fatalf("loading config: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
 	pool, err := database.Connect(ctx, cfg.DatabaseURL())
 	if err != nil {
 		log.Fatal(err)
@@ -41,9 +43,13 @@ func main() {
 
 	games := repository.NewGames(pool)
 	boards := repository.NewScoreboards(pool)
+	obsClient := obs.New(cfg.OBSAddr, cfg.OBSPassword, cfg.OBSReplayScene, cfg.OBSReplaySource, cfg.OBSReplayIntro)
+	go obsClient.Run(ctx)
+	defer obsClient.Close()
 	h := handler.New(
 		service.NewGameService(games),
 		service.NewScoreboardService(games, boards),
+		service.NewReplayService(games, obsClient),
 	)
 
 	log.Printf("environment: %q, listening on %s", cfg.Environment, cfg.ServerAddr)

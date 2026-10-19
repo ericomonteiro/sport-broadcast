@@ -20,7 +20,7 @@
   }
   main {
     display: grid;
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: 340px minmax(0, 1fr);
     gap: 20px;
     padding: 20px 24px;
     max-width: 1280px;
@@ -92,8 +92,19 @@
     border-radius: 8px;
     overflow: hidden;
     aspect-ratio: 16 / 9;
+    position: relative;
   }
-  .preview iframe { width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; transform: scale(var(--scale, 0.5)); }
+  /* Absolute so the 1920px iframe does not widen the layout; only the scaled box is visible. */
+  .preview iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1920px;
+    height: 1080px;
+    border: 0;
+    transform-origin: 0 0;
+    transform: scale(var(--scale, 0.5));
+  }
   .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .message { font-size: 14px; min-height: 1.2em; margin-top: 10px; }
   .message.error { color: #f87171; }
@@ -263,6 +274,8 @@
     document.getElementById("control-url").textContent = gameURL(id, "control");
     document.getElementById("control-link").href = gameURL(id, "control");
     document.getElementById("preview").src = gameURL(id, "overlay");
+    // The preview was hidden until now, so its width (and scale) must be computed after unhiding.
+    fitPreview();
   }
 
   function fitPreview() {
