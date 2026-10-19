@@ -20,14 +20,19 @@ import (
 
 // Config holds every setting the application needs at runtime.
 type Config struct {
-	Environment string
-	ServerAddr  string
-	DBHost      string
-	DBPort      string
-	DBUser      string
-	DBPassword  string
-	DBName      string
-	DBSSLMode   string
+	Environment     string
+	ServerAddr      string
+	DBHost          string
+	DBPort          string
+	DBUser          string
+	DBPassword      string
+	DBName          string
+	DBSSLMode       string
+	OBSAddr         string
+	OBSPassword     string
+	OBSReplayScene  string
+	OBSReplaySource string
+	OBSReplayIntro  string
 }
 
 // DatabaseURL builds the Postgres connection URL.
@@ -64,14 +69,19 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Environment: env,
-		ServerAddr:  valueOr(lookup("server.addr"), ":8080"),
-		DBHost:      lookup("db.host"),
-		DBPort:      lookup("db.port"),
-		DBUser:      lookup("db.user"),
-		DBPassword:  lookup("db.password"),
-		DBName:      lookup("db.name"),
-		DBSSLMode:   valueOr(lookup("db.sslmode"), "disable"),
+		Environment:     env,
+		ServerAddr:      valueOr(lookup("server.addr"), ":8080"),
+		DBHost:          lookup("db.host"),
+		DBPort:          lookup("db.port"),
+		DBUser:          lookup("db.user"),
+		DBPassword:      lookup("db.password"),
+		DBName:          lookup("db.name"),
+		DBSSLMode:       valueOr(lookup("db.sslmode"), "disable"),
+		OBSAddr:         valueOr(lookup("obs.addr"), "localhost:4455"),
+		OBSPassword:     lookup("obs.password"),
+		OBSReplayScene:  valueOr(lookup("obs.replay.scene"), "Replay"),
+		OBSReplaySource: valueOr(lookup("obs.replay.source"), "Replay Clip"),
+		OBSReplayIntro:  valueOr(lookup("obs.replay.intro"), "Replay Intro"),
 	}
 
 	var missing []string

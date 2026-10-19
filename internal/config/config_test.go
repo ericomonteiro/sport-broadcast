@@ -129,3 +129,22 @@ func TestDatabaseURLEscapesPassword(t *testing.T) {
 		t.Fatalf("DatabaseURL = %q, want %q", got, want)
 	}
 }
+
+func TestOBSSettingsDefaultAndEnvOverride(t *testing.T) {
+	inDir(t)
+	t.Setenv("ENVIRONMENT", "")
+	t.Setenv("DB_HOST", "localhost")
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_USER", "u")
+	t.Setenv("DB_NAME", "n")
+	os.Unsetenv("OBS_ADDR")
+	t.Setenv("OBS_PASSWORD", "from-env")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OBSAddr != "localhost:4455" || cfg.OBSPassword != "from-env" {
+		t.Fatalf("unexpected OBS config: addr=%q password=%q", cfg.OBSAddr, cfg.OBSPassword)
+	}
+}

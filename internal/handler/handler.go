@@ -26,11 +26,12 @@ import (
 type Handler struct {
 	games       *service.GameService
 	scoreboards *service.ScoreboardService
+	replays     *service.ReplayService
 }
 
 // New creates a Handler on top of the services.
-func New(games *service.GameService, scoreboards *service.ScoreboardService) *Handler {
-	return &Handler{games: games, scoreboards: scoreboards}
+func New(games *service.GameService, scoreboards *service.ScoreboardService, replays *service.ReplayService) *Handler {
+	return &Handler{games: games, scoreboards: scoreboards, replays: replays}
 }
 
 // Routes returns the HTTP router with all routes.
@@ -53,6 +54,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /api/games", h.createGame)
 	mux.HandleFunc("GET /api/games/{id}", h.getGame)
 	mux.HandleFunc("POST /api/games/{id}/finish", h.finishGame)
+	mux.HandleFunc("POST /api/games/{id}/replay", h.saveReplay)
 
 	mux.HandleFunc("GET /api/scoreboard/{id}/state", h.state)
 	mux.HandleFunc("GET /api/scoreboard/{id}/events", h.events)
@@ -164,6 +166,18 @@ func (h *Handler) finishGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, game)
+}
+
+func (h *Handler) saveReplay(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.replays.Save(r.Context(), id); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) state(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +292,9 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, validation.Error(), http.StatusUnprocessableEntity)
 	case errors.Is(err, service.ErrNotFound):
 		http.Error(w, service.ErrNotFound.Error(), http.StatusNotFound)
+	case errors.Is(err, service.ErrReplayUnavailable):
+		log.Printf("replay: %v", err)
+		http.Error(w, service.ErrReplayUnavailable.Error(), http.StatusServiceUnavailable)
 	default:
 		log.Printf("internal error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
