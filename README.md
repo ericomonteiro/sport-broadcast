@@ -6,7 +6,7 @@ Placar ao vivo para transmissões de partidas de beach tênis. Cada jogo tem o s
 
 - [Go](https://go.dev/dl/) 1.25 ou superior
 - [Docker](https://www.docker.com/) (para o Postgres local)
-- OBS Studio (para usar o overlay na transmissão)
+- OBS Studio 28 ou mais novo (para o overlay e para o replay, que usa o WebSocket embutido no OBS)
 
 ## Como rodar
 
@@ -50,6 +50,11 @@ As configurações vêm de um arquivo `application-<ENVIRONMENT>.properties` e d
 | `db.password` | — | Senha do Postgres |
 | `db.name` | — | Nome do banco (obrigatório) |
 | `db.sslmode` | `disable` | Modo SSL do Postgres |
+| `obs.addr` | `localhost:4455` | Endereço do WebSocket do OBS |
+| `obs.password` | — | Senha do WebSocket do OBS (prefira `OBS_PASSWORD` no ambiente) |
+| `obs.replay.scene` | `Replay` | Cena onde os replays são tocados |
+| `obs.replay.source` | `Replay Clip` | Fonte de mídia, dentro dessa cena, que toca o clipe |
+| `obs.replay.intro` | `Replay Intro` | Fonte de mídia, dentro da mesma cena, tocada antes de cada clipe |
 
 Se `ENVIRONMENT` não estiver definida, só as variáveis de ambiente são lidas.
 
@@ -92,10 +97,28 @@ Abra `http://localhost:8080/scoreboard/<id do jogo>/control` em outra aba ou em 
 - **Desfazer último ponto:** volta a última ação. Os nomes dos atletas não são afetados.
 - **Novo jogo:** zera o placar e mantém os nomes.
 - **Atletas:** digite os nomes de cada time separados por vírgula e clique em *Salvar nomes*.
+- **Transmissão → Replay:** pede ao OBS para salvar o replay buffer (os últimos segundos gravados). Veja a seção *Replay no OBS*.
 
 Várias abas do painel podem ficar abertas ao mesmo tempo. Quando uma muda o placar, as outras são atualizadas.
 
 O placar é salvo a cada ação. Ao reiniciar o servidor, o placar do jogo volta como estava. O histórico de desfazer não é salvo, então depois de reiniciar só é possível desfazer ações feitas desde a inicialização.
+
+## Replay no OBS
+
+O botão **Replay** do painel salva os últimos segundos do replay buffer e toca o clipe no próprio OBS. Depois, volta para a cena que estava no ar.
+
+1. Ative o WebSocket em **Ferramentas → Configurações do servidor WebSocket** e defina uma senha. Use a porta 4455, ou ajuste `obs.addr`.
+2. Ative o replay buffer em **Configurações → Saída → Replay Buffer**, com duração de pelo menos 20 segundos (assim o clipe de 15 segundos não perde o início). Inicie o replay buffer no OBS antes de usar o botão.
+3. Crie uma cena chamada **Replay** com duas fontes de mídia, **Replay Clip** e **Replay Intro**. As duas devem ter a opção de reiniciar quando a fonte ficar ativa, e a repetição (*loop*) não é necessária: o app desliga a repetição a cada reprodução. A **Replay Intro** pode ter o arquivo da vinheta que você quiser. Ela toca até o fim antes do clipe e depois é ocultada.
+4. Passe a senha pelo ambiente, sem gravá-la em arquivo:
+
+   ```bash
+   OBS_PASSWORD='sua-senha' ENVIRONMENT=local go run ./cmd/broadcast
+   ```
+
+Cada replay salvo é tocado automaticamente, seja pelo botão do painel, seja pelo atalho do OBS. Se o OBS estiver fechado ou o replay buffer desligado, o botão mostra uma mensagem de erro. O app reconecta sozinho quando o OBS volta.
+
+Os nomes das cenas e das fontes podem ser outros: basta ajustar as chaves `obs.replay.*`. Nomes de cena e de fonte não podem ser iguais no OBS.
 
 ## Regras de pontuação
 
@@ -116,6 +139,7 @@ internal/repository/    consultas ao banco
 internal/scoreboard/    regras de pontuação, sem I/O (com testes)
 internal/service/       regras: partidas, placares ao vivo e assinantes
 internal/handler/       camada HTTP: rotas, páginas, JSON e stream de atualizações (SSE)
+internal/infra/obs/     cliente do WebSocket do OBS: conexão, salvamento e reprodução do replay
 resource/               ícones usados no overlay (ex.: bolinha de tênis), embutidos no binário
 web/                    páginas do overlay e do painel, embutidas no binário
 docker-compose.yml      Postgres para desenvolvimento local
@@ -140,6 +164,7 @@ Os testes não acessam o banco: a camada de serviço usa um armazenamento em mem
 | POST | `/api/games` | Cria um jogo. Corpo: `{"name", "bestOf", "teams"}` |
 | GET | `/api/games/{id}` | Dados de um jogo, incluindo `finishedAt` |
 | POST | `/api/games/{id}/finish` | Finaliza o jogo. Repetir a chamada não altera a data |
+| POST | `/api/games/{id}/replay` | Salva o replay buffer do OBS, que é tocado na cena de replay. Funciona também depois de finalizar |
 | GET | `/api/scoreboard/{id}/state` | Estado atual do placar (JSON) |
 | GET | `/api/scoreboard/{id}/events` | Stream SSE com as atualizações do jogo |
 | POST | `/api/scoreboard/{id}/point` | Registra ponto. Corpo: `{"team": 0}` ou `{"team": 1}` |
@@ -152,4 +177,4 @@ Os testes não acessam o banco: a camada de serviço usa um armazenamento em mem
 | POST | `/api/scoreboard/{id}/teams` | Altera os nomes. Corpo: `{"teams": [{"players": ["..."]}, {"players": ["..."]}]}` |
 | POST | `/api/scoreboard/{id}/reset` | Zera o placar. Corpo: `{"bestOf": 3}` |
 
-Erros: `400` para ID ou JSON inválido, `404` para jogo inexistente, `422` para violação das regras, dados inválidos ou partida finalizada, e `500` para erros de banco (registrados no log, sem detalhes na resposta).
+Erros: `400` para ID ou JSON inválido, `404` para jogo inexistente, `422` para violação das regras ou dados inválidos, `503` quando o OBS não está disponível para o replay, e `500` para erros de banco (registrados no log, sem detalhes na resposta). Partida finalizada também retorna `422` nas rotas do placar.
