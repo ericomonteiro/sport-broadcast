@@ -105,11 +105,18 @@ O placar é salvo a cada ação. Ao reiniciar o servidor, o placar do jogo volta
 
 ## Replay no OBS
 
-O botão **Replay** do painel salva os últimos segundos do replay buffer e toca o clipe no próprio OBS. Depois, volta para a cena que estava no ar.
+Os botões **Replay 5s**, **Replay 10s**, **Replay 15s** e **Replay 20s** do painel salvam os últimos segundos do replay buffer e tocam o clipe no próprio OBS. Depois, o app volta para a cena que estava no ar.
+
+- **Replay 20s:** toca o buffer inteiro, desde o início.
+- **Replay 15s:** começa 5 segundos depois do início do clipe.
+- **Replay 10s:** começa 10 segundos depois do início do clipe.
+- **Replay 5s:** começa 15 segundos depois do início do clipe.
+
+Por isso o buffer no OBS deve ter pelo menos 20 segundos.
 
 1. Ative o WebSocket em **Ferramentas → Configurações do servidor WebSocket** e defina uma senha. Use a porta 4455, ou ajuste `obs.addr`.
-2. Ative o replay buffer em **Configurações → Saída → Replay Buffer**, com duração de pelo menos 20 segundos (assim o clipe de 15 segundos não perde o início). Inicie o replay buffer no OBS antes de usar o botão.
-3. Crie uma cena chamada **Replay** com duas fontes de mídia, **Replay Clip** e **Replay Intro**. As duas devem ter a opção de reiniciar quando a fonte ficar ativa, e a repetição (*loop*) não é necessária: o app desliga a repetição a cada reprodução. A **Replay Intro** pode ter o arquivo da vinheta que você quiser. Ela toca até o fim antes do clipe e depois é ocultada.
+2. Ative o replay buffer em **Configurações → Saída → Replay Buffer**, com duração de 20 segundos. Inicie o replay buffer no OBS antes de usar o botão.
+3. Crie uma cena chamada **Replay** com três fontes de mídia: **Replay Clip** (o clipe), **Replay Intro** (tocada antes do clipe) e **Live** (tocada depois do clipe, para voltar ao ao vivo). As duas devem ter a opção de reiniciar quando a fonte ficar ativa, e a repetição (*loop*) não é necessária: o app desliga a repetição a cada reprodução. A **Replay Intro** pode ter o arquivo da vinheta que você quiser. Ela toca até o fim antes do clipe e depois é ocultada. A **Live** toca até o fim depois do clipe e também é ocultada, e só então o app volta para a cena anterior.
 4. Passe a senha pelo ambiente, sem gravá-la em arquivo:
 
    ```bash
@@ -164,7 +171,7 @@ Os testes não acessam o banco: a camada de serviço usa um armazenamento em mem
 | POST | `/api/games` | Cria um jogo. Corpo: `{"name", "bestOf", "teams"}` |
 | GET | `/api/games/{id}` | Dados de um jogo, incluindo `finishedAt` |
 | POST | `/api/games/{id}/finish` | Finaliza o jogo. Repetir a chamada não altera a data |
-| POST | `/api/games/{id}/replay` | Salva o replay buffer do OBS, que é tocado na cena de replay. Funciona também depois de finalizar |
+| POST | `/api/games/{id}/replay` | Salva o replay buffer do OBS e toca os últimos segundos na cena de replay. Corpo: `{"seconds": 5}`, `10`, `15` ou `20`. Funciona também depois de finalizar |
 | GET | `/api/scoreboard/{id}/state` | Estado atual do placar (JSON) |
 | GET | `/api/scoreboard/{id}/events` | Stream SSE com as atualizações do jogo |
 | POST | `/api/scoreboard/{id}/point` | Registra ponto. Corpo: `{"team": 0}` ou `{"team": 1}` |
