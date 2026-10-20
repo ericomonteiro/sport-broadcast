@@ -27,5 +27,5 @@ type ScoreboardStore interface {
 // ReplaySaver asks the broadcast software to save its replay buffer.
 // The OBS adapter (internal/infra/obs) implements it; tests use a fake.
 type ReplaySaver interface {
-	SaveReplay() error
+	SaveReplay(seconds int) error
 }

@@ -2,7 +2,9 @@
 //
 // Run keeps a connection open and reconnects when it drops, so the application
 // starts even when OBS is closed. When OBS saves a replay, the replay is played
-// in the replay scene and the scene that was on air comes back afterwards.
+// in the replay scene and the scene that was on air comes back afterwards. A
+// shorter replay (10s or 15s) starts part-way through the saved clip, so that
+// only its last seconds are shown.
 package obs
 
 import (
@@ -30,6 +32,9 @@ const (
 	playbackTimeout = 2 * time.Minute  // upper bound for one clip, in case OBS never reports its end
 	queueSize       = 8
 	restartAction   = "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART"
+	// fullReplaySeconds is the length of the whole replay buffer. Clips saved
+	// without a requested length (for example by the OBS hotkey) play in full.
+	fullReplaySeconds = 20
 )
 
 var errNotConnected = errors.New("not connected to OBS")
@@ -41,24 +46,37 @@ type Client struct {
 	replayScene  string
 	replaySource string
 	replayIntro  string
+	replayLive   string
 
 	mu   sync.Mutex
 	conn *goobs.Client
 
-	saved chan string // replay files waiting to be played
+	saved chan clip // replay files waiting to be played
+
+	// pending holds the lengths asked for by SaveReplay, in request order. OBS
+	// reports each saved file in the same order, so the next event takes the first.
+	pending []int
+}
+
+// clip is a saved replay file and the number of seconds to show from its end.
+type clip struct {
+	path    string
+	seconds int
 }
 
 // New creates a Client. replayScene is the OBS scene where replays play,
-// replaySource is the media source with the clip, and replayIntro is the media
-// source that plays before each clip (empty to skip it). It does not connect yet; call Run.
-func New(addr, password, replayScene, replaySource, replayIntro string) *Client {
+// replaySource is the media source with the clip, replayIntro plays before each
+// clip, and replayLive plays after it to return to the live picture. An empty
+// intro or live name skips that step. It does not connect yet; call Run.
+func New(addr, password, replayScene, replaySource, replayIntro, replayLive string) *Client {
 	return &Client{
 		addr:         addr,
 		password:     password,
 		replayScene:  replayScene,
 		replaySource: replaySource,
 		replayIntro:  replayIntro,
-		saved:        make(chan string, queueSize),
+		replayLive:   replayLive,
+		saved:        make(chan clip, queueSize),
 	}
 }
 
@@ -95,15 +113,25 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
-// SaveReplay tells OBS to save the replay buffer to a file. The length of the
-// clip is the buffer length set in OBS (Settings > Output > Replay Buffer).
-// The saved file is then played by Run through the replay event.
-func (c *Client) SaveReplay() error {
+// SaveReplay tells OBS to save the replay buffer to a file. seconds is how much of
+// the end of the saved clip to play (at most the buffer length set in OBS). The
+// saved file is then played by Run through the replay event.
+func (c *Client) SaveReplay(seconds int) error {
 	conn := c.current()
 	if conn == nil {
 		return errNotConnected
 	}
+
+	// Queue the length before asking OBS, because the saved event can arrive
+	// before the response does.
+	c.mu.Lock()
+	c.pending = append(c.pending, seconds)
+	c.mu.Unlock()
+
 	if _, err := conn.Outputs.SaveReplayBuffer(&outputs.SaveReplayBufferParams{}); err != nil {
+		c.mu.Lock()
+		c.pending = c.pending[:len(c.pending)-1]
+		c.mu.Unlock()
 		return fmt.Errorf("saving replay buffer: %w", err)
 	}
 	return nil
@@ -145,8 +173,16 @@ func (c *Client) setConn(conn *goobs.Client) {
 func (c *Client) onEvent(event any) {
 	switch e := event.(type) {
 	case *events.ReplayBufferSaved:
+		next := clip{path: e.SavedReplayPath, seconds: fullReplaySeconds}
+		c.mu.Lock()
+		if len(c.pending) > 0 {
+			next.seconds = c.pending[0]
+			c.pending = c.pending[1:]
+		}
+		c.mu.Unlock()
+
 		select {
-		case c.saved <- e.SavedReplayPath:
+		case c.saved <- next:
 		default:
 			log.Printf("replay queue is full, not playing %s", e.SavedReplayPath)
 		}
@@ -159,9 +195,9 @@ func (c *Client) playLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case path := <-c.saved:
-			if err := c.play(path); err != nil {
-				log.Printf("playing replay %s: %v", path, err)
+		case next := <-c.saved:
+			if err := c.play(next); err != nil {
+				log.Printf("playing replay %s: %v", next.path, err)
 			}
 		}
 	}
@@ -169,7 +205,7 @@ func (c *Client) playLoop(ctx context.Context) {
 
 // play shows the replay scene, plays the intro (if configured) and then the clip,
 // and goes back to the scene that was on air before.
-func (c *Client) play(path string) error {
+func (c *Client) play(next clip) error {
 	conn := c.current()
 	if conn == nil {
 		return errNotConnected
@@ -186,47 +222,80 @@ func (c *Client) play(path string) error {
 		InputName: &c.replaySource,
 		InputSettings: map[string]any{
 			"is_local_file": true,
-			"local_file":    path,
+			"local_file":    next.path,
 			"looping":       false, // with looping on, the clip never reports its end
 		},
 	}); err != nil {
 		return fmt.Errorf("setting replay file: %w", err)
 	}
 
+	// Sources with "restart when active" start as soon as the scene goes on air, so
+	// the clip and the live source stay hidden until their turn.
+	c.hide(conn, c.replaySource, c.replayLive)
+
 	if _, err := conn.Scenes.SetCurrentProgramScene(scenes.NewSetCurrentProgramSceneParams().WithSceneName(c.replayScene)); err != nil {
 		return fmt.Errorf("switching to replay scene: %w", err)
 	}
 
 	if c.replayIntro != "" {
-		c.playIntro(conn)
+		c.playInReplayScene(conn, c.replayIntro)
 	}
 
+	if err := c.setVisible(conn, c.replaySource, true); err != nil {
+		c.backTo(conn, previous)
+		return fmt.Errorf("showing replay clip: %w", err)
+	}
 	if err := c.startSource(conn, c.replaySource); err != nil {
 		c.backTo(conn, previous)
 		return fmt.Errorf("starting replay: %w", err)
 	}
+	if next.seconds < fullReplaySeconds {
+		if err := c.seekToLast(conn, next.seconds); err != nil {
+			log.Printf("starting %d s replay from the beginning: %v", next.seconds, err)
+		}
+	}
 	c.waitForEnd(conn, c.replaySource)
+	if err := c.setVisible(conn, c.replaySource, false); err != nil {
+		log.Printf("hiding replay clip: %v", err)
+	}
+
+	if c.replayLive != "" {
+		c.playInReplayScene(conn, c.replayLive)
+	}
 	c.backTo(conn, previous)
 	log.Printf("back to scene %q", previous)
 	return nil
 }
 
-// playIntro shows the intro and waits until it has played completely, then hides
-// it so its last frame does not cover the clip. A failure only skips the intro:
-// the clip still plays.
-func (c *Client) playIntro(conn *goobs.Client) {
-	if err := c.setVisible(conn, c.replayIntro, true); err != nil {
-		log.Printf("replay intro %q not shown: %v", c.replayIntro, err)
+// playInReplayScene shows a media source of the replay scene, waits until it has
+// played completely, and then hides it so its last frame does not stay on screen.
+// A failure only skips this source; the rest of the replay still runs.
+func (c *Client) playInReplayScene(conn *goobs.Client, name string) {
+	if err := c.setVisible(conn, name, true); err != nil {
+		log.Printf("%s not shown: %v", name, err)
 		return
 	}
-	if err := c.startSource(conn, c.replayIntro); err != nil {
-		log.Printf("replay intro %q not played: %v", c.replayIntro, err)
+	if err := c.startSource(conn, name); err != nil {
+		log.Printf("%s not played: %v", name, err)
 	} else {
-		c.waitForEnd(conn, c.replayIntro)
+		c.waitForEnd(conn, name)
 	}
 
-	if err := c.setVisible(conn, c.replayIntro, false); err != nil {
-		log.Printf("hiding replay intro %q: %v", c.replayIntro, err)
+	if err := c.setVisible(conn, name, false); err != nil {
+		log.Printf("hiding %s: %v", name, err)
+	}
+}
+
+// hide hides the given sources inside the replay scene. Failures are logged,
+// because a missing source should not stop the replay.
+func (c *Client) hide(conn *goobs.Client, names ...string) {
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if err := c.setVisible(conn, name, false); err != nil {
+			log.Printf("hiding %s before the replay: %v", name, err)
+		}
 	}
 }
 
@@ -258,6 +327,51 @@ func (c *Client) startSource(conn *goobs.Client, name string) error {
 		return fmt.Errorf("restarting %q: %w", name, err)
 	}
 	return nil
+}
+
+// seekToLast moves the clip so that only its last `seconds` are played. OBS opens
+// the file asynchronously, so this waits for PLAYING and then seeks once. It does
+// not retry: repeated seeks made the clip jump back over and over. The position
+// is read back and logged, so a seek that did not stick is visible in the log.
+func (c *Client) seekToLast(conn *goobs.Client, seconds int) error {
+	deadline := time.Now().Add(startTimeout)
+	var last string
+
+	for time.Now().Before(deadline) {
+		status, err := conn.MediaInputs.GetMediaInputStatus(mediainputs.NewGetMediaInputStatusParams().WithInputName(c.replaySource))
+		if err != nil {
+			return fmt.Errorf("reading replay status: %w", err)
+		}
+		last = status.MediaState
+		if status.MediaState == "OBS_MEDIA_STATE_PLAYING" && status.MediaDuration > 0 {
+			offset := seekOffset(status.MediaDuration, seconds)
+			if offset == 0 {
+				return nil
+			}
+			if _, err := conn.MediaInputs.SetMediaInputCursor(mediainputs.NewSetMediaInputCursorParams().WithInputName(c.replaySource).WithMediaCursor(offset)); err != nil {
+				return fmt.Errorf("seeking replay: %w", err)
+			}
+			time.Sleep(2 * pollInterval)
+			after, err := conn.MediaInputs.GetMediaInputStatus(mediainputs.NewGetMediaInputStatusParams().WithInputName(c.replaySource))
+			if err != nil {
+				return fmt.Errorf("reading replay position: %w", err)
+			}
+			log.Printf("seek to %.1fs of %.1fs: cursor now %.1fs (state %s)", offset/1000, status.MediaDuration/1000, after.MediaCursor/1000, after.MediaState)
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("replay did not reach PLAYING within %s (last state %q)", startTimeout, last)
+}
+
+// seekOffset returns the position, in milliseconds, where a clip of durationMs
+// starts so that only its last `seconds` remain. It never goes before the start.
+func seekOffset(durationMs float64, seconds int) float64 {
+	offset := durationMs - float64(seconds)*1000
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // waitForEnd polls a media source until it has played and stopped. It asks OBS

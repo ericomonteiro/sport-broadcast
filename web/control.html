@@ -66,6 +66,7 @@
   }
   .names button { margin-top: 10px; }
   .names { margin: 0 0 12px; }
+  .replay-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 
   .error { color: #f87171; margin-top: 12px; min-height: 1em; font-size: 14px; }
   .error.ok { color: #a3e635; }
@@ -139,8 +140,13 @@
 
 <section id="broadcast-panel" class="card">
   <h2>Transmissão</h2>
-  <p>Replay: salva os últimos segundos do replay buffer do OBS e toca o clipe na cena de replay. Depois, volta para a cena anterior.</p>
-  <button class="small" onclick="saveReplay()">Replay</button>
+  <p>Toca os últimos segundos do replay buffer do OBS na cena de replay e depois volta para a cena anterior.</p>
+  <div class="replay-buttons">
+    <button class="small" onclick="saveReplay(5)">Replay 5s</button>
+    <button class="small" onclick="saveReplay(10)">Replay 10s</button>
+    <button class="small" onclick="saveReplay(15)">Replay 15s</button>
+    <button class="small" onclick="saveReplay(20)">Replay 20s</button>
+  </div>
 </section>
 
 <div class="error" id="error"></div>
@@ -228,13 +234,17 @@
     send(base + "/teams", { teams: teams });
   }
 
-  // Saves the OBS replay buffer. The length of the clip is set in OBS, not here.
-  function saveReplay() {
-    fetch("/api/games/" + gameId + "/replay", { method: "POST" }).then(function (r) {
+  // Saves the last `seconds` of the OBS replay buffer (the buffer itself is set in OBS).
+  function saveReplay(seconds) {
+    fetch("/api/games/" + gameId + "/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds: seconds })
+    }).then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t.trim()); });
       var el = document.getElementById("error");
       el.className = "error ok";
-      el.textContent = "Replay salvo no OBS.";
+      el.textContent = "Replay de " + seconds + " s salvo no OBS.";
     }).catch(function (e) {
       document.getElementById("error").className = "error";
       document.getElementById("error").textContent = e.message;

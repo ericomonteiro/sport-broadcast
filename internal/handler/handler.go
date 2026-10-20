@@ -92,10 +92,11 @@ func (h *Handler) Routes() http.Handler {
 
 // requestBody is the JSON accepted by the POST routes. Each route only uses the fields it needs.
 type requestBody struct {
-	Name   string             `json:"name"`
-	Team   int                `json:"team"`
-	Teams  [2]scoreboard.Team `json:"teams"`
-	BestOf int                `json:"bestOf"`
+	Name    string             `json:"name"`
+	Team    int                `json:"team"`
+	Teams   [2]scoreboard.Team `json:"teams"`
+	BestOf  int                `json:"bestOf"`
+	Seconds int                `json:"seconds"`
 }
 
 // action runs one scoreboard operation and responds with the resulting state.
@@ -173,7 +174,11 @@ func (h *Handler) saveReplay(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.replays.Save(r.Context(), id); err != nil {
+	var b requestBody
+	if !decodeBody(w, r, &b) {
+		return
+	}
+	if err := h.replays.Save(r.Context(), id, b.Seconds); err != nil {
 		fail(w, err)
 		return
 	}
