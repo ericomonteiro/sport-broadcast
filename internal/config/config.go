@@ -33,6 +33,7 @@ type Config struct {
 	OBSReplayScene  string
 	OBSReplaySource string
 	OBSReplayIntro  string
+	OBSReplayLive   string
 }
 
 // DatabaseURL builds the Postgres connection URL.
@@ -82,6 +83,7 @@ func Load() (Config, error) {
 		OBSReplayScene:  valueOr(lookup("obs.replay.scene"), "Replay"),
 		OBSReplaySource: valueOr(lookup("obs.replay.source"), "Replay Clip"),
 		OBSReplayIntro:  valueOr(lookup("obs.replay.intro"), "Replay Intro"),
+		OBSReplayLive:   valueOr(lookup("obs.replay.live"), "Live"),
 	}
 
 	var missing []string

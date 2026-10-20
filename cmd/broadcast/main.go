@@ -43,7 +43,7 @@ func main() {
 
 	games := repository.NewGames(pool)
 	boards := repository.NewScoreboards(pool)
-	obsClient := obs.New(cfg.OBSAddr, cfg.OBSPassword, cfg.OBSReplayScene, cfg.OBSReplaySource, cfg.OBSReplayIntro)
+	obsClient := obs.New(cfg.OBSAddr, cfg.OBSPassword, cfg.OBSReplayScene, cfg.OBSReplaySource, cfg.OBSReplayIntro, cfg.OBSReplayLive)
 	go obsClient.Run(ctx)
 	defer obsClient.Close()
 	h := handler.New(

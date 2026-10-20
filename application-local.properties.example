@@ -19,3 +19,5 @@ obs.replay.scene=Replay
 obs.replay.source=Replay Clip
 # Media source in the replay scene that plays before each clip.
 obs.replay.intro=Replay Intro
+# Media source in the replay scene that plays after the clip, to return to the live picture.
+obs.replay.live=Live
